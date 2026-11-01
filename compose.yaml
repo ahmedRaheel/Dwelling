@@ -1,37 +1,40 @@
-name: proptech
+# Reuse an existing PostgreSQL/pgvector container and its existing database.
+# This Compose project deliberately has NO postgres service and NO pgdata volume.
+# Set POSTGRES_DOCKER_NETWORK to a Docker network attached to your PostgreSQL container.
+name: proptech-app
+
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    restart: unless-stopped
+  db-prepare:
+    image: postgres:16-alpine
+    restart: 'no'
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define in .env}
-      POSTGRES_DB: proptech
-      PG_APP_PASSWORD: ${PG_APP_PASSWORD:?Define in .env}
-    ports:
-      - '127.0.0.1:5432:5432'
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-proptech}
+      POSTGRES_ADMIN_USER: ${POSTGRES_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set existing PostgreSQL admin password in .env}
+      PG_APP_PASSWORD: ${PG_APP_PASSWORD:?Set application role password in .env}
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/01-init-db.sh:ro
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d proptech']
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      - ./docker/bootstrap-existing-db.sh:/bootstrap/bootstrap-existing-db.sh:ro
+    entrypoint: ['/bin/sh', '/bootstrap/bootstrap-existing-db.sh']
+    networks:
+      - existing_postgres
 
   migrate:
     build:
       context: ./backend
     command: ['alembic', 'upgrade', 'head']
     user: root
+    restart: 'no'
     environment:
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Define in .env}
       DATABASE_URL: ${DATABASE_URL:?Define in .env}
       JWT_SECRET: ${JWT_SECRET:?Define in .env}
     depends_on:
-      postgres:
-        condition: service_healthy
-    restart: 'no'
+      db-prepare:
+        condition: service_completed_successfully
+    networks:
+      - existing_postgres
 
   backend:
     build:
@@ -55,6 +58,9 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    networks:
+      - app
+      - existing_postgres
     healthcheck:
       test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
       interval: 15s
@@ -67,10 +73,19 @@ services:
       context: ./frontend
     restart: unless-stopped
     ports:
-      - '8080:80'
+      - '${FRONTEND_PORT:-8080}:80'
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge
+  existing_postgres:
+    external: true
+    name: ${POSTGRES_DOCKER_NETWORK:?Set this to a Docker network already attached to your PostgreSQL container}
+
 volumes:
-  pgdata: {}
   media: {}

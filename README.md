@@ -100,7 +100,8 @@ proptech_saas/
 ├── compose.yaml
 ├── .github/workflows/ci.yml
 ├── docker/
-│   ├── init-db.sh
+│   ├── init-db.sh (legacy: only for creating a brand-new development database)
+│   ├── bootstrap-existing-db.sh (used by Compose)
 │   └── nginx.conf
 ├── backend/
 │   ├── Dockerfile
@@ -131,28 +132,55 @@ proptech_saas/
     └── src/pages/{AuthPage,Marketplace,PropertyDetail,BrokerDashboard,CustomerPortal,ListingComposer}.tsx
 ```
 
-## 2. Run locally with Docker Compose
+## 2. Run with an EXISTING PostgreSQL 16 / pgvector container
 
-Prerequisites: Docker Engine + Compose v2, around 2 GB of free RAM for the default app. Enabling the sentence-transformer model requires significantly more disk/RAM. Run commands from the project root:
+**This release intentionally does not start PostgreSQL, create a new PostgreSQL volume, or overwrite your existing `proptech` database.** An existing database might contain important data. Back it up and inspect existing table names before running Alembic on it. If the database contains a different application's schema, use a separate database instead of running these migrations into it.
+
+The following assumes the already-running Postgres container uses a Docker network accessible to other containers (normal for Docker Compose), contains the database `proptech`, and has the pgvector extension available (such as `pgvector/pgvector:pg16`). The app's DB user `proptech_app` is not a superuser and must remain NOBYPASSRLS.
+
+1. Find your existing database container and network:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'
+# Replace <postgres-container> with its exact name from docker ps.
+docker inspect <postgres-container> --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}'
+```
+
+2. Configure the `.env` file:
 
 ```bash
 cp .env.example .env
-# Change the development passwords and JWT_SECRET before starting.
-docker compose up --build -d
-# Check migration, backend, and front end
-docker compose ps
-docker compose logs --tail=100 migrate backend frontend
+# POSTGRES_DOCKER_NETWORK=<the-network-from-docker-inspect>
+# POSTGRES_HOST=postgres (or the existing container's network alias)
+# POSTGRES_DB=proptech
+# POSTGRES_PASSWORD=<existing admin password>
+# PG_APP_PASSWORD=<password for the proptech_app application role>
+# DATABASE_URL=postgresql+asyncpg://proptech_app:<URL-encoded-app-password>@postgres:5432/proptech
+# MIGRATION_DATABASE_URL=postgresql+psycopg://postgres:<URL-encoded-admin-password>@postgres:5432/proptech
+# JWT_SECRET=<long random secret>
 ```
 
-- Frontend: **http://localhost:8080**
-- OpenAPI / interactive Swagger: **http://localhost:8080/api/docs**
+The host `postgres` in those URLs is the existing Postgres service's **Docker DNS alias**, not your local machine. If the current Postgres container is named `proptech-postgres-1`, check its Docker aliases or use that container name on its existing user-defined network. Do not use `localhost` inside another container. If connecting to a database installed directly on the host instead of in Docker, a different network setup is required; a loopback-only host port (`127.0.0.1:5432`) is **not** reachable just by switching to `host.docker.internal` on Linux.
+
+3. Start the application:
+
+```bash
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 db-prepare migrate backend frontend
+```
+
+The `db-prepare` **one-shot client** connects to the existing DB, ensures `vector` is available, and creates or updates a restricted `proptech_app` role without recreating the database. `migrate` runs Alembic with a privileged login; `backend` uses the restricted login; `frontend` only sees the backend via the internal app network. The named `media` volume stores property photographs. The database's existing volume is **not managed by this Compose project**.
+
+- Frontend: **http://localhost:8080** (configurable with `FRONTEND_PORT`)
+- Swagger: **http://localhost:8080/api/docs**
 - Liveness: **http://localhost:8080/api/health/live**
 - Readiness: **http://localhost:8080/api/health/ready**
-- Database: `localhost:5432`, bound to loopback only
 
-The `migrate` service executes `alembic upgrade head` before `backend` starts. The `postgres` service runs the *pgvector* extension image. `init-db.sh` creates a **non-superuser, NOBYPASSRLS** application role. Only the migration job uses PostgreSQL administrator credentials. Environment passwords are for development only.
+**Database safety:** avoid `docker compose down -v` on a production installation. This Compose file manages the application media volume; `-v` would delete that photo volume. Do not run `alembic downgrade` without a tested backup. Privileged migration credentials are never passed into the API service.
 
-**Existing PostgreSQL volume:** initialization scripts only run on an empty volume. To retain data, manually provision the application role and inspect migrations; do not destroy volumes in a live environment. To remove a *disposable local development* database: `docker compose down -v` (destructive).
+**Note on port 5432:** Your existing database can keep its current `127.0.0.1:5432:5432` host binding. These application containers reach it over the attached Docker network using port 5432, which does not require changing host port mappings.
 
 ### Optional fictional demo inventory
 
@@ -340,7 +368,7 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-`test_validation.py` tests kind-specific PG and portion input rules. `test_media.py` validates secure photo normalization, size/type checks, storage and path containment. `test_api_integration.py` uses `httpx.AsyncClient` against PostgreSQL with migrations applied and checks tenant isolation, inquiry routing, auth permissions and cold-start predictions. **Run tests against a disposable database only.** GitHub Actions provisions PostgreSQL with Docker Compose and performs backend tests and a React TypeScript/Vite build. Repository does not include an npm lockfile; generate and commit one before release for deterministic installs.
+`test_validation.py` tests kind-specific PG and portion input rules. `test_media.py` validates secure photo normalization, size/type checks, storage and path containment. `test_api_integration.py` uses `httpx.AsyncClient` against PostgreSQL with migrations applied and checks tenant isolation, inquiry routing, auth permissions and cold-start predictions. **Run tests against a disposable database only.** GitHub Actions provisions a temporary isolated pgvector PostgreSQL container for backend migrations and tests, and separately builds the React TypeScript/Vite frontend. The application Compose file never starts a PostgreSQL container. Repository does not include an npm lockfile; generate and commit one before release for deterministic installs.
 
 ## 10. Production release checklist (not yet complete)
 

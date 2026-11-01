@@ -12,17 +12,27 @@ jobs:
           python-version: '3.12'
       - name: Install tooling
         run: pip install -r backend/requirements-dev.txt
-      - name: Set test environment
+      - name: Start isolated CI PostgreSQL with pgvector
         run: |
-          cp .env.example .env
-          echo 'JWT_SECRET=testing-only-an-adequately-long-secret-0123456789' >> .env
-          echo 'DATABASE_URL=postgresql+asyncpg://proptech_app:local_app_password@localhost:5432/proptech' >> $GITHUB_ENV
-          echo 'JWT_SECRET=testing-only-an-adequately-long-secret-0123456789' >> $GITHUB_ENV
-      - name: Provision isolated DB and run migration
-        run: docker compose up -d --build postgres migrate && docker compose logs migrate
-      - name: Static checks and API tests
+          docker run -d --name proptech-ci-postgres \
+            -e POSTGRES_PASSWORD=ci_admin_password \
+            -e POSTGRES_DB=proptech \
+            -p 127.0.0.1:5432:5432 pgvector/pgvector:pg16
+          for attempt in $(seq 1 40); do
+            if docker exec proptech-ci-postgres pg_isready -U postgres -d proptech -q; then break; fi
+            sleep 2
+          done
+          docker exec proptech-ci-postgres psql -U postgres -d proptech \
+            -v ON_ERROR_STOP=1 -c "CREATE ROLE proptech_app LOGIN PASSWORD 'ci_app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+      - name: Run migrations and tests against isolated database
         working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://proptech_app:ci_app_password@localhost:5432/proptech
+          MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:ci_admin_password@localhost:5432/proptech
+          JWT_SECRET: testing-only-an-adequately-long-secret-0123456789
+          ENVIRONMENT: test
         run: |
+          alembic upgrade head
           python -m compileall -q app
           pytest -q
   frontend:
