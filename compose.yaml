@@ -1,31 +1,30 @@
-# Reuse an existing PostgreSQL/pgvector container and its existing database.
-# This Compose project deliberately has NO postgres service and NO pgdata volume.
-# Set POSTGRES_DOCKER_NETWORK to a Docker network attached to your PostgreSQL container.
 name: proptech-app
 
 services:
   db-prepare:
-    image: postgres:16-alpine
-    restart: 'no'
+    image: postgres:18
+    restart: "no"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-proptech}
-      POSTGRES_ADMIN_USER: ${POSTGRES_ADMIN_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set existing PostgreSQL admin password in .env}
-      PG_APP_PASSWORD: ${PG_APP_PASSWORD:?Set application role password in .env}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: proptech
+      POSTGRES_ADMIN_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PG_APP_PASSWORD: ${PG_APP_PASSWORD:?Set PG_APP_PASSWORD in .env}
     volumes:
       - ./docker/bootstrap-existing-db.sh:/bootstrap/bootstrap-existing-db.sh:ro
-    entrypoint: ['/bin/sh', '/bootstrap/bootstrap-existing-db.sh']
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/bootstrap-existing-db.sh
     networks:
       - existing_postgres
 
   migrate:
     build:
       context: ./backend
-    command: ['alembic', 'upgrade', 'head']
+    command: ["alembic", "upgrade", "head"]
     user: root
-    restart: 'no'
+    restart: "no"
     environment:
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Define in .env}
       DATABASE_URL: ${DATABASE_URL:?Define in .env}
@@ -45,8 +44,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Define in .env}
       JWT_SECRET: ${JWT_SECRET:?Define in .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Define CORS_ORIGINS in .env}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       EMBEDDINGS_ENABLED: ${EMBEDDINGS_ENABLED:-false}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
       MIN_TRAINING_SAMPLES: ${MIN_TRAINING_SAMPLES:-20}
@@ -62,7 +61,11 @@ services:
       - app
       - existing_postgres
     healthcheck:
-      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"
       interval: 15s
       timeout: 5s
       retries: 10
@@ -73,7 +76,7 @@ services:
       context: ./frontend
     restart: unless-stopped
     ports:
-      - '${FRONTEND_PORT:-8080}:80'
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -83,9 +86,10 @@ services:
 networks:
   app:
     driver: bridge
+
   existing_postgres:
     external: true
-    name: ${POSTGRES_DOCKER_NETWORK:?Set this to a Docker network already attached to your PostgreSQL container}
+    name: app-net
 
 volumes:
-  media: {}
+  media:
