@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Conservative patch for PropTech Alembic 0002 duplicate amenities column.
+"""Repair PropTech Alembic 0002 metadata and duplicate amenities operations.
 
-Run from repository root: python3 fix_listing_media.py
-Uses only Python standard library; leaves a timestamped backup.
+Run from the repository root: python3 fix_listing_media.py
+Creates a timestamped backup and validates the resulting Python source.
 """
 from __future__ import annotations
 
@@ -12,139 +12,172 @@ from pathlib import Path
 import shutil
 import sys
 
-MIGRATIONS = Path('backend/alembic/versions')
-INITIAL = MIGRATIONS / '0001_initial.py'
-LISTING = MIGRATIONS / '0002_listing_media.py'
-HELPER_NAME = '_proptech_column_exists'
+MIGRATIONS = Path("backend/alembic/versions")
+INITIAL = MIGRATIONS / "0001_initial.py"
+LISTING = MIGRATIONS / "0002_listing_media.py"
+HELPER_NAME = "_proptech_column_exists"
+EXPECTED_REVISIONS = {"revision": "0002_listing_media", "down_revision": "0001_initial"}
 
 
-def literal_str(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
+def string_literal(node: ast.AST) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def operation(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "op":
+        return func.attr
     return None
 
 
-def op_name(node: ast.Call) -> str | None:
-    f = node.func
-    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == 'op':
-        return f.attr
-    return None
+def is_column(node: ast.AST, name: str) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "Column"
+        and bool(node.args)
+        and string_literal(node.args[0]) == name
+    )
 
 
-def column_name(node: ast.AST) -> str | None:
-    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-        return None
-    if node.func.attr != 'Column' or not node.args:
-        return None
-    return literal_str(node.args[0])
-
-
-def is_amenities_op(node: ast.AST, action: str) -> bool:
+def is_amenities_statement(node: ast.stmt, action: str) -> bool:
     if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
         return False
     call = node.value
-    if op_name(call) != action or len(call.args) < 2 or literal_str(call.args[0]) != 'properties':
+    if operation(call) != action or len(call.args) < 2 or string_literal(call.args[0]) != "properties":
         return False
-    if action == 'add_column':
-        return column_name(call.args[1]) == 'amenities'
-    return literal_str(call.args[1]) == 'amenities'
+    return is_column(call.args[1], "amenities") if action == "add_column" else string_literal(call.args[1]) == "amenities"
 
 
-def initial_owns_column(source: str) -> bool:
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
+def initial_creates_amenities(source: str) -> bool:
+    for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
-        action = op_name(node)
-        if action == 'create_table' and node.args and literal_str(node.args[0]) == 'properties':
-            if any(column_name(arg) == 'amenities' for arg in node.args[1:]):
+        if operation(node) == "create_table" and node.args and string_literal(node.args[0]) == "properties":
+            if any(is_column(arg, "amenities") for arg in node.args[1:]):
                 return True
-        if action == 'add_column' and len(node.args) > 1 and literal_str(node.args[0]) == 'properties':
-            if column_name(node.args[1]) == 'amenities':
+        if operation(node) == "add_column" and len(node.args) > 1 and string_literal(node.args[0]) == "properties":
+            if is_column(node.args[1], "amenities"):
                 return True
     return False
 
 
-def statements_in_function(tree: ast.Module, name: str) -> list[ast.stmt]:
-    functions = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
-    if len(functions) != 1:
-        raise ValueError(f'Expected exactly one {name}() function.')
-    return functions[0].body
+def get_function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    matches = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+    if len(matches) != 1:
+        raise ValueError(f"Expected exactly one {name}() function")
+    return matches[0]
 
 
-def insert_helper(source: str) -> str:
-    if HELPER_NAME in source:
-        return source
-    helper = '''\n\ndef _proptech_column_exists(table_name: str, column_name: str) -> bool:\n    from alembic import op\n    import sqlalchemy as sa\n\n    inspector = sa.inspect(op.get_bind())\n    return any(\n        column["name"] == column_name\n        for column in inspector.get_columns(table_name, schema="public")\n    )\n'''
-    tree = ast.parse(source)
-    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'upgrade']
-    if len(funcs) != 1:
-        raise ValueError('Missing or ambiguous upgrade() function')
-    lines = source.splitlines(keepends=True)
-    loc = funcs[0].lineno - 1
-    lines.insert(loc, helper + '\n')
-    return ''.join(lines)
+def check_metadata(tree: ast.Module) -> list[str]:
+    missing = []
+    for key, expected in EXPECTED_REVISIONS.items():
+        values = []
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == key for t in node.targets):
+                values.append(string_literal(node.value))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == key:
+                values.append(string_literal(node.value) if node.value is not None else None)
+        if not values:
+            missing.append(key)
+        elif len(values) != 1 or values[0] != expected:
+            raise ValueError(f"Unexpected {key} value {values!r}; expected {expected!r}. Manual review required")
+    return missing
 
 
 def main() -> int:
     if not INITIAL.is_file() or not LISTING.is_file():
-        print('ERROR: Run this in the PropTech repository root containing backend/alembic/versions/', file=sys.stderr)
+        print("ERROR: Run from the repository root containing backend/alembic/versions/", file=sys.stderr)
+        return 2
+    try:
+        initial_source = INITIAL.read_text(encoding="utf-8")
+        source = LISTING.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        owns = initial_creates_amenities(initial_source)
+        upgrade = get_function(tree, "upgrade")
+        downgrade = get_function(tree, "downgrade")
+        missing = check_metadata(tree)
+
+        adds = [n for n in upgrade.body if is_amenities_statement(n, "add_column")]
+        drops = [n for n in downgrade.body if is_amenities_statement(n, "drop_column")]
+        if len(adds) > 1 or len(drops) > 1:
+            raise ValueError("Multiple direct amenities add/drop operations; review manually")
+        if not owns and not adds and HELPER_NAME not in source:
+            raise ValueError("0001 does not own amenities, and 0002 has no direct add or existing guard")
+
+        lines = source.splitlines(keepends=True)
+        edits: list[tuple[int, int, list[str]]] = []
+
+        def delete_statement(fn: ast.FunctionDef, node: ast.stmt) -> None:
+            # Replace a sole statement with pass so the function stays valid.
+            if len(fn.body) == 1:
+                indentation = " " * (node.col_offset)
+                edits.append((node.lineno - 1, node.end_lineno, [indentation + "pass\n"]))
+            else:
+                edits.append((node.lineno - 1, node.end_lineno, []))
+
+        if adds:
+            add = adds[0]
+            if owns:
+                delete_statement(upgrade, add)
+            else:
+                indent = " " * add.col_offset
+                old = lines[add.lineno - 1:add.end_lineno]
+                edits.append((add.lineno - 1, add.end_lineno,
+                              [indent + f'if not {HELPER_NAME}("properties", "amenities"):\n']
+                              + ["    " + line for line in old]))
+        if drops:
+            # A downgrade cannot know if the column predated migration 0002.
+            delete_statement(downgrade, drops[0])
+
+        for start, end, replacement in sorted(edits, key=lambda e: e[0], reverse=True):
+            lines[start:end] = replacement
+        updated = "".join(lines)
+        ast.parse(updated)
+
+        # Insert metadata and helper immediately before upgrade(), after imports.
+        insertion = []
+        for key in missing:
+            insertion.append(f'{key} = "{EXPECTED_REVISIONS[key]}"\n')
+        if missing:
+            insertion.append("\n")
+        if not owns and adds and HELPER_NAME not in updated:
+            insertion.extend([
+                "def _proptech_column_exists(table_name: str, column_name: str) -> bool:\n",
+                "    from alembic import op\n",
+                "    import sqlalchemy as sa\n",
+                "    inspector = sa.inspect(op.get_bind())\n",
+                "    return any(col['name'] == column_name for col in inspector.get_columns(table_name, schema='public'))\n",
+                "\n\n",
+            ])
+        if insertion:
+            new_tree = ast.parse(updated)
+            new_upgrade = get_function(new_tree, "upgrade")
+            new_lines = updated.splitlines(keepends=True)
+            new_lines[new_upgrade.lineno - 1:new_upgrade.lineno - 1] = insertion
+            updated = "".join(new_lines)
+
+        final_tree = ast.parse(updated)
+        if check_metadata(final_tree):
+            raise ValueError("Revision metadata still incomplete")
+        get_function(final_tree, "upgrade")
+        get_function(final_tree, "downgrade")
+
+        if updated == source:
+            print("No change necessary: migration already patched and metadata valid.")
+            return 0
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = LISTING.with_name(f"{LISTING.name}.backup-{timestamp}")
+        shutil.copy2(LISTING, backup)
+        LISTING.write_text(updated, encoding="utf-8")
+        print(f"Updated: {LISTING}")
+        print(f"Backup:  {backup}")
+        print("Review:  git diff -- backend/alembic/versions/0002_listing_media.py")
+        return 0
+    except (SyntaxError, ValueError) as exc:
+        print(f"ERROR: {exc}. No files changed.", file=sys.stderr)
         return 2
 
-    initial = INITIAL.read_text(encoding='utf-8')
-    original = LISTING.read_text(encoding='utf-8')
-    tree = ast.parse(original)
-    owns = initial_owns_column(initial)
-    upgrades = [n for n in statements_in_function(tree, 'upgrade') if is_amenities_op(n, 'add_column')]
-    if len(upgrades) != 1:
-        print(f'ERROR: Expected exactly one direct amenities add_column in 0002 upgrade(), found {len(upgrades)}. No changes made.', file=sys.stderr)
-        return 2
-    downgrade_ops = [n for n in statements_in_function(tree, 'downgrade') if is_amenities_op(n, 'drop_column')]
-    if len(downgrade_ops) > 1:
-        print('ERROR: Multiple amenities drop operations; no changes made.', file=sys.stderr)
-        return 2
 
-    lines = original.splitlines(keepends=True)
-    add = upgrades[0]
-    indent = lines[add.lineno - 1][:len(lines[add.lineno - 1]) - len(lines[add.lineno - 1].lstrip())]
-    if not indent:
-        print('ERROR: add_column not indented inside upgrade(); no changes made.', file=sys.stderr)
-        return 2
-
-    replacements: list[tuple[int, int, list[str]]] = []
-    if owns:
-        replacements.append((add.lineno - 1, add.end_lineno, []))
-        if downgrade_ops:
-            drop = downgrade_ops[0]
-            replacements.append((drop.lineno - 1, drop.end_lineno, []))
-        print('0001_initial already defines properties.amenities; removing duplicate add/drop from 0002.')
-    else:
-        original_stmt = lines[add.lineno - 1:add.end_lineno]
-        wrapped = [indent + f'if not {HELPER_NAME}("properties", "amenities"):\n']
-        wrapped.extend('    ' + line for line in original_stmt)
-        replacements.append((add.lineno - 1, add.end_lineno, wrapped))
-        # Do not drop a potentially pre-existing column when downgrading.
-        if downgrade_ops:
-            drop = downgrade_ops[0]
-            replacements.append((drop.lineno - 1, drop.end_lineno, []))
-        print('0001_initial does not declare amenities; adding an existence guard to 0002.')
-
-    for start, end, replacement in sorted(replacements, reverse=True):
-        lines[start:end] = replacement
-    updated = ''.join(lines)
-    if not owns:
-        updated = insert_helper(updated)
-    ast.parse(updated)
-
-    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    backup = LISTING.with_name(LISTING.name + f'.backup-{timestamp}')
-    shutil.copy2(LISTING, backup)
-    LISTING.write_text(updated, encoding='utf-8')
-    print(f'Patched: {LISTING}')
-    print(f'Backup:  {backup}')
-    print('Review diff: git diff -- backend/alembic/versions/0002_listing_media.py')
-    return 0
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())
