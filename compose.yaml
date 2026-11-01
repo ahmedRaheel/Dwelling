@@ -1,0 +1,76 @@
+name: proptech
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define in .env}
+      POSTGRES_DB: proptech
+      PG_APP_PASSWORD: ${PG_APP_PASSWORD:?Define in .env}
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/01-init-db.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d proptech']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+    command: ['alembic', 'upgrade', 'head']
+    user: root
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Define in .env}
+      DATABASE_URL: ${DATABASE_URL:?Define in .env}
+      JWT_SECRET: ${JWT_SECRET:?Define in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        INSTALL_AI: ${INSTALL_AI:-false}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Define in .env}
+      JWT_SECRET: ${JWT_SECRET:?Define in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      EMBEDDINGS_ENABLED: ${EMBEDDINGS_ENABLED:-false}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      MIN_TRAINING_SAMPLES: ${MIN_TRAINING_SAMPLES:-20}
+      MEDIA_DIR: /srv/media
+      MAX_PROPERTY_PHOTOS: ${MAX_PROPERTY_PHOTOS:-24}
+      MAX_PHOTO_UPLOAD_MB: ${MAX_PHOTO_UPLOAD_MB:-12}
+    volumes:
+      - media:/srv/media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+volumes:
+  pgdata: {}
+  media: {}

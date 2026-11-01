@@ -1,0 +1,37 @@
+name: validate
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tooling
+        run: pip install -r backend/requirements-dev.txt
+      - name: Set test environment
+        run: |
+          cp .env.example .env
+          echo 'JWT_SECRET=testing-only-an-adequately-long-secret-0123456789' >> .env
+          echo 'DATABASE_URL=postgresql+asyncpg://proptech_app:local_app_password@localhost:5432/proptech' >> $GITHUB_ENV
+          echo 'JWT_SECRET=testing-only-an-adequately-long-secret-0123456789' >> $GITHUB_ENV
+      - name: Provision isolated DB and run migration
+        run: docker compose up -d --build postgres migrate && docker compose logs migrate
+      - name: Static checks and API tests
+        working-directory: backend
+        run: |
+          python -m compileall -q app
+          pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build React frontend
+        working-directory: frontend
+        run: npm install --no-audit --no-fund && npm run build
