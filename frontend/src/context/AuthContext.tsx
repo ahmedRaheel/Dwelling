@@ -6,8 +6,8 @@ type LoginCredentials = { tenant_slug: string; email: string; password: string }
 type AuthContextValue = {
   user: User | null; loading: boolean;
   login: (details: LoginCredentials) => Promise<void>;
-  registerAgency: (details: { agency_name: string; slug: string; full_name: string; email: string; password: string }) => Promise<void>;
-  registerCustomer: (details: LoginCredentials & { full_name: string }) => Promise<void>;
+  registerAgency: (details: { agency_name: string; slug: string; full_name: string; email: string; password: string; account_type: 'agency' | 'owner' | 'broker' | 'dealer' }) => Promise<void>;
+  registerCustomer: (details: { full_name: string; email: string; password: string; tenant_slug?: string }) => Promise<void>;
   logout: () => Promise<void>; reload: () => Promise<void>;
 };
 const Context = createContext<AuthContextValue | null>(null);
@@ -28,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [reload]);
   async function acceptTokens(tokens: Tokens) {
     setTokens(tokens);
+    if (tokens.workspace_slug) localStorage.setItem('dwelling_workspace_slug', tokens.workspace_slug);
     await reload();
   }
   const login = async (details: LoginCredentials) => {

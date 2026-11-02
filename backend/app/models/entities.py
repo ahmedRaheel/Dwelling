@@ -80,6 +80,7 @@ class Tenant(Base, Timestamped):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(160))
     slug: Mapped[str] = mapped_column(String(80), unique=True)
+    account_type: Mapped[str] = mapped_column(String(24), nullable=False, default='agency', server_default='agency')
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
     public_description: Mapped[str] = mapped_column(Text, default='', server_default='')
     public_city: Mapped[str] = mapped_column(String(100), default='', server_default='')
@@ -186,6 +187,18 @@ class PropertyPhoto(Base):
     @property
     def thumbnail_url(self) -> str:
         return f'{self.url}?variant=thumb'
+
+
+class PropertyVideo(Base):
+    """A private video asset. Only its owner or viewers of a published listing may read it."""
+    __tablename__ = 'property_videos'
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uid)
+    property_id: Mapped[UUID] = mapped_column(ForeignKey('properties.id', ondelete='CASCADE'), unique=True)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey('tenants.id'), index=True)
+    object_key: Mapped[str] = mapped_column(String(255), unique=True)
+    mime_type: Mapped[str] = mapped_column(String(40))
+    byte_size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class PGDetails(Base):

@@ -14,12 +14,14 @@ from app.schemas.domain import (CreateStaff, CustomerRegistration, LoginInput, P
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 
 
-async def issue_tokens(db, user: User) -> TokenPair:
+async def issue_tokens(db, user: User, workspace_slug: str | None = None) -> TokenPair:
     access, _ = create_token(str(user.id), str(user.tenant_id), 'access')
     refresh, expires = create_token(str(user.id), str(user.tenant_id), 'refresh')
     db.add(RefreshToken(tenant_id=user.tenant_id, user_id=user.id, token_hash=token_digest(refresh), expires_at=expires))
     await db.flush()
-    return TokenPair(access_token=access, refresh_token=refresh)
+    if workspace_slug is None:
+        workspace_slug = await db.scalar(select(Tenant.slug).where(Tenant.id == user.tenant_id))
+    return TokenPair(access_token=access, refresh_token=refresh, workspace_slug=workspace_slug)
 
 
 async def get_tenant(db, slug: str) -> Tenant:
@@ -33,7 +35,7 @@ async def get_tenant(db, slug: str) -> Tenant:
 async def create_tenant(payload: TenantRegistration, db: DB):
     if await db.scalar(select(Tenant).where(Tenant.slug == payload.slug)):
         raise HTTPException(409, 'Agency slug already taken')
-    tenant = Tenant(id=uuid4(), name=payload.agency_name, slug=payload.slug)
+    tenant = Tenant(id=uuid4(), name=payload.agency_name, slug=payload.slug, account_type=payload.account_type)
     await set_scope(db, tenant.id)
     user = User(tenant_id=tenant.id, full_name=payload.full_name, email=str(payload.email).lower(),
                 password_digest=hash_password(payload.password), role=Role.owner)
@@ -48,7 +50,14 @@ async def create_tenant(payload: TenantRegistration, db: DB):
 
 @router.post('/register', response_model=TokenPair, status_code=201)
 async def register_customer(payload: CustomerRegistration, db: DB):
-    tenant = await get_tenant(db, payload.tenant_slug)
+    if payload.tenant_slug:
+        tenant = await get_tenant(db, payload.tenant_slug)
+    else:
+        # Independent buyers need no agency invitation or existing workspace.
+        # The random workspace slug is returned with the tokens for later login.
+        tenant = Tenant(id=uuid4(), name=f'{payload.full_name} · Personal',
+                        slug=f'home-{uuid4().hex[:16]}', account_type='customer')
+        db.add(tenant)
     await set_scope(db, tenant.id)
     user = User(tenant_id=tenant.id, full_name=payload.full_name, email=str(payload.email).lower(),
                 password_digest=hash_password(payload.password), role=Role.customer)
@@ -109,8 +118,12 @@ async def logout(payload: RefreshInput, db: DB):
 
 
 @router.get('/me', response_model=UserResponse)
-async def me(user: CurrentUser):
-    return user
+async def me(user: CurrentUser, db: DB):
+    tenant = await db.scalar(select(Tenant).where(Tenant.id == user.tenant_id))
+    return UserResponse.model_validate(user).model_copy(update={
+        'account_type': tenant.account_type if tenant else None,
+        'workspace_slug': tenant.slug if tenant else None,
+    })
 
 
 @router.patch('/me/preferences', response_model=UserResponse)

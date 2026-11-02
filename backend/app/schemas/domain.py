@@ -11,6 +11,7 @@ class StrictModel(BaseModel):
 
 
 class TenantRegistration(StrictModel):
+    account_type: str = Field(default='agency', pattern=r'^(agency|owner|broker|dealer)$')
     agency_name: str = Field(min_length=2, max_length=160)
     slug: str = Field(pattern=r'^[a-z0-9][a-z0-9-]{2,49}$')
     full_name: str = Field(min_length=2, max_length=160)
@@ -19,7 +20,7 @@ class TenantRegistration(StrictModel):
 
 
 class CustomerRegistration(StrictModel):
-    tenant_slug: str
+    tenant_slug: str | None = Field(default=None, max_length=80)
     full_name: str = Field(min_length=2, max_length=160)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
@@ -39,6 +40,7 @@ class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = 'bearer'
+    workspace_slug: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -49,6 +51,8 @@ class UserResponse(BaseModel):
     full_name: str
     role: Role
     preferences: dict
+    account_type: str | None = None
+    workspace_slug: str | None = None
 
 
 class CreateStaff(StrictModel):

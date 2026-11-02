@@ -11,6 +11,7 @@ import type {
 } from '@/api/types';
 import { PropertyImage } from '@/components/listings/PropertyImage';
 import { PhotoManager } from '@/components/listings/PhotoManager';
+import { VideoManager } from '@/components/listings/VideoManager';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/context/LanguageContext';
 import { currency, errorMessage } from '@/lib/utils';
@@ -230,7 +231,7 @@ export function ListingComposer() {
 
         {stage === 'photos' && property && <div className="studio-panel p-5 sm:p-9"><PhotoManager property={property} onChanged={async () => {
           const latest = await api<Property>(`/listings/${property.id}`); setProperty(latest);
-        }}/><div className="mt-9 flex justify-end border-t border-line pt-6"><Button onClick={() => { setStage('publish'); setSavedMessage(''); }} className="!rounded-md">Review ad <ArrowRight size={16}/></Button></div></div>}
+        }}/><VideoManager property={property}/><div className="mt-9 flex justify-end border-t border-line pt-6"><Button onClick={() => { setStage('publish'); setSavedMessage(''); }} className="!rounded-md">Review ad <ArrowRight size={16}/></Button></div></div>}
 
         {stage === 'publish' && property && <div className="space-y-6">
           <section className="studio-panel overflow-hidden"><div className="grid sm:grid-cols-[200px_1fr]">

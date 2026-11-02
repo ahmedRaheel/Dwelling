@@ -95,6 +95,10 @@ export function CustomerPortal() {
     <p className="kicker">YOUR PERSONAL PROPERTY DESK</p>
     <h1 className="editorial-title mt-3 text-[clamp(2.2rem,5vw,4rem)]">Welcome back, {user?.full_name.split(' ')[0]}.</h1>
     <p className="mt-3 text-sm text-muted">A considered shortlist, built around what matters to you.</p>
+    {user?.workspace_slug && <div className="mt-5 inline-flex flex-wrap items-center gap-3 rounded border border-line bg-white px-4 py-3 text-xs text-muted">
+      <span>Workspace for sign-in: <strong className="font-semibold text-ink">{user.workspace_slug}</strong></span>
+      <button type="button" className="font-semibold text-accent hover:underline" onClick={() => void navigator.clipboard.writeText(user.workspace_slug!)}>Copy</button>
+    </div>}
     {error && <p role="alert" className="error-note mt-6">{error}</p>}
     {notice && <p role="status" className="success-note mt-6">{notice}</p>}
     <div className="mt-9 grid gap-9 lg:grid-cols-[290px_minmax(0,1fr)] xl:gap-14">

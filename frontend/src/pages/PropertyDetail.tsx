@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, ArrowUpRight, Bath, BedDouble, Check, ChevronLeft, ChevronRight,
   Copy, Heart, MapPin, Maximize2, Ruler, Share2, Sparkles, Utensils, X, Zap } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '@/api/client';
+import { api, apiBlob } from '@/api/client';
 import type { Forecast, Prediction, Property } from '@/api/types';
 import { PropertyImage } from '@/components/listings/PropertyImage';
 import { CompareControl } from '@/components/CompareControl';
@@ -17,6 +17,7 @@ export function PropertyDetail() {
   const { user } = useAuth();
   const { t, language } = useLanguage();
   const [property, setProperty] = useState<Property | null>(null);
+  const [videoSource, setVideoSource] = useState<string | null>(null);
   const [valuation, setValuation] = useState<Prediction | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [error, setError] = useState('');
@@ -40,6 +41,20 @@ export function PropertyDetail() {
     }).catch(cause => { if (active) setError(errorMessage(cause)); });
     return () => { active = false; };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !property) return;
+    let active = true;
+    let objectUrl: string | undefined;
+    void api<{ available: boolean; url: string | null }>(`/listings/${id}/video`).then(async data => {
+      if (!data.available || !data.url || !active) return;
+      if (property.status === 'published') { setVideoSource(data.url); return; }
+      const blob = await apiBlob(`/listings/${id}/video/file`);
+      objectUrl = URL.createObjectURL(blob);
+      if (active) setVideoSource(objectUrl);
+    }).catch(() => {});
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [id, property?.status]);
 
   const photos = useMemo(() => {
     if (!property) return [];
@@ -149,6 +164,7 @@ export function PropertyDetail() {
           <p className="mt-5 whitespace-pre-line text-[15px] leading-8 text-[#606a5f]">{property.description || 'Contact the listing agent for further information.'}</p>
           {property.highlights.length > 0 && <div className="mt-6 grid gap-3 sm:grid-cols-2">{property.highlights.map((item, index) => <p key={`${index}:${item}`} className="flex items-start gap-2 text-sm"><Check size={17} className="mt-0.5 shrink-0 text-accent"/>{item}</p>)}</div>}
         </section>
+        {videoSource && <section className="border-t border-line py-9"><h2 className="studio-heading mb-5">Property video tour</h2><video className="aspect-video w-full max-w-3xl rounded-md bg-ink" src={videoSource} controls playsInline preload="metadata"/></section>}
         {(property.society || property.block || property.price_negotiable || property.ready_to_move || property.video_url) && <section className="border-t border-line pt-9">
           <p className="kicker">ESSENTIAL INFORMATION</p><h2 className="studio-heading mt-3">Property highlights</h2>
           <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">

@@ -38,10 +38,10 @@ export interface Property {
 }
 export type PropertyInput = Omit<Property, 'id' | 'tenant_id' | 'version' | 'photos' | 'created_at' | 'updated_at'>;
 export interface Page<T> { items: T[]; total: number; page: number; size: number }
-export interface Tokens { access_token: string; refresh_token: string; token_type: string }
+export interface Tokens { access_token: string; refresh_token: string; token_type: string; workspace_slug?: string | null }
 export interface User {
   id: string; tenant_id: string; full_name: string; email: string; role: Role;
-  preferences: Record<string, string | number>;
+  preferences: Record<string, string | number>; account_type?: 'customer' | 'agency' | 'broker' | 'dealer' | 'owner'; workspace_slug?: string;
 }
 export interface Lead {
   id: string; tenant_id: string; property_id: string; customer_user_id: string | null;

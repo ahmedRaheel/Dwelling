@@ -20,7 +20,7 @@ def clean_url(raw: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Remove orphaned property photographs')
+    parser = argparse.ArgumentParser(description='Remove orphaned property media')
     parser.add_argument('--apply', action='store_true', help='Actually unlink orphaned files')
     parser.add_argument('--min-age-hours', type=int, default=48)
     args = parser.parse_args()
@@ -36,10 +36,14 @@ def main() -> None:
         with db.cursor() as cur:
             cur.execute('SELECT object_key, thumbnail_key FROM property_photos')
             live = {key for pair in cur.fetchall() for key in pair}
+            cur.execute("SELECT to_regclass('public.property_videos')")
+            if cur.fetchone()[0] is not None:
+                cur.execute('SELECT object_key FROM property_videos')
+                live.update(row[0] for row in cur.fetchall())
     threshold = (datetime.now(timezone.utc) - timedelta(hours=args.min_age_hours)).timestamp()
     unreferenced: list[Path] = []
-    for file in root.rglob('*.webp'):
-        if file.is_symlink() or not file.is_file():
+    for file in root.rglob('*'):
+        if file.suffix not in {'.webp', '.mp4', '.webm'} or file.is_symlink() or not file.is_file():
             continue
         if file.stat().st_mtime < threshold and file.relative_to(root).as_posix() not in live:
             unreferenced.append(file)
