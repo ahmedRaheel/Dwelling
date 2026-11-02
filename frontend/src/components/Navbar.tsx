@@ -25,7 +25,7 @@ export function Navbar() {
         {user ? <><span className="hidden max-w-32 truncate text-xs text-muted sm:block">{user.full_name}</span>
           <Button type="button" variant="outline" size="sm" onClick={() => void logout()}><LogOut size={15}/><span className="hidden sm:inline">{t('signOut')}</span></Button>
           <Link to={professional ? '/broker' : '/customer'} className="md:hidden" aria-label="Open dashboard"><Menu size={20}/></Link></> :
-          <div className="flex items-center gap-2"><Link to="/auth" className="hidden px-3 py-2 text-xs font-semibold text-ink hover:text-accent sm:inline-flex">{t('signIn')}</Link><Link to="/auth" className="inline-flex items-center gap-1.5 rounded-sm bg-ink px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-accent">Create account <ArrowUpRight size={14}/></Link></div>}
+          <div className="flex items-center gap-2"><Link to="/auth" className="hidden px-3 py-2 text-xs font-semibold text-ink hover:text-accent sm:inline-flex">{t('signIn')}</Link><Link to="/auth?mode=register" className="inline-flex items-center gap-1.5 rounded-sm bg-ink px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-accent">Create account <ArrowUpRight size={14}/></Link></div>}
       </div>
     </div>
     <nav aria-label="Mobile navigation" className="flex gap-5 overflow-x-auto border-t border-line px-5 py-3 text-xs font-semibold text-[#505b50] md:hidden">

@@ -1,9 +1,10 @@
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from app.api.deps import DB, CurrentUser, require_roles
 from app.core.database import set_scope
 from app.core.security import create_token, decode_token, hash_password, token_digest, verify_password
@@ -12,6 +13,20 @@ from app.schemas.domain import (CreateStaff, CustomerRegistration, LoginInput, P
                                 RefreshInput, TenantRegistration, TokenPair, UserResponse)
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
+logger = logging.getLogger(__name__)
+
+
+async def ensure_registration_schema(db) -> None:
+    """Fail clearly if Alembic 0004 was not applied. Do not leak DB credentials."""
+    try:
+        present = await db.scalar(text("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='tenants' AND column_name='account_type')"))
+    except DBAPIError as exc:
+        logger.exception('Registration schema verification failed')
+        raise HTTPException(503, 'Registration database is unavailable') from exc
+    if not present:
+        logger.error('Registration unavailable: migration 0004 account_type column missing')
+        raise HTTPException(503, 'Registration is temporarily unavailable: database migration 0004 is required')
+
 
 
 async def issue_tokens(db, user: User, workspace_slug: str | None = None) -> TokenPair:
@@ -33,6 +48,7 @@ async def get_tenant(db, slug: str) -> Tenant:
 
 @router.post('/tenant/register', response_model=TokenPair, status_code=201)
 async def create_tenant(payload: TenantRegistration, db: DB):
+    await ensure_registration_schema(db)
     if await db.scalar(select(Tenant).where(Tenant.slug == payload.slug)):
         raise HTTPException(409, 'Agency slug already taken')
     tenant = Tenant(id=uuid4(), name=payload.agency_name, slug=payload.slug, account_type=payload.account_type)
@@ -42,14 +58,18 @@ async def create_tenant(payload: TenantRegistration, db: DB):
     db.add_all([tenant, user])
     try:
         await db.flush()
+        await set_scope(db, tenant.id, user.id)
+        return await issue_tokens(db, user)
     except IntegrityError as exc:
         raise HTTPException(409, 'Agency slug or account already exists') from exc
-    await set_scope(db, tenant.id, user.id)
-    return await issue_tokens(db, user)
+    except DBAPIError as exc:
+        logger.exception('Professional account registration failed')
+        raise HTTPException(503, 'Unable to create account. Check database migration status in server logs') from exc
 
 
 @router.post('/register', response_model=TokenPair, status_code=201)
 async def register_customer(payload: CustomerRegistration, db: DB):
+    await ensure_registration_schema(db)
     if payload.tenant_slug:
         tenant = await get_tenant(db, payload.tenant_slug)
     else:
@@ -64,10 +84,13 @@ async def register_customer(payload: CustomerRegistration, db: DB):
     db.add(user)
     try:
         await db.flush()
+        await set_scope(db, tenant.id, user.id)
+        return await issue_tokens(db, user)
     except IntegrityError as exc:
         raise HTTPException(409, 'Email already registered for this agency') from exc
-    await set_scope(db, tenant.id, user.id)
-    return await issue_tokens(db, user)
+    except DBAPIError as exc:
+        logger.exception('Customer account registration failed')
+        raise HTTPException(503, 'Unable to create account. Check database migration status in server logs') from exc
 
 
 @router.post('/login', response_model=TokenPair)

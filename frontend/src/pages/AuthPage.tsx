@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, Building2, House, KeyRound, ShieldCheck, UserRound, Users } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
@@ -17,7 +17,9 @@ const accountTypes: { id: AccountType; label: string; description: string; icon:
 ];
 
 export function AuthPage() {
-  const [mode, setMode] = useState<Mode>('sign-in');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode: Mode = searchParams.get('mode') === 'register' ? 'create-account' : 'sign-in';
+  const changeMode = (next: Mode) => { setSearchParams(next === 'create-account' ? { mode: 'register' } : {}); setError(''); };
   const [accountType, setAccountType] = useState<AccountType>('customer');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -32,6 +34,11 @@ export function AuthPage() {
     setError('');
     const fields = new FormData(event.currentTarget);
     const value = (name: string) => String(fields.get(name) ?? '').trim();
+    if (mode === 'create-account' && isProfessional && !/^[a-z0-9][a-z0-9-]{2,49}$/.test(value('slug'))) {
+      setError('Workspace address must use 3–50 lowercase letters, numbers or hyphens, and start with a letter or number.');
+      setPending(false);
+      return;
+    }
     if (mode === 'create-account' && value('password') !== value('confirm_password')) {
       setError('Passwords do not match.');
       setPending(false);
@@ -74,8 +81,8 @@ export function AuthPage() {
     </section>
     <section className="studio-panel w-full p-6 sm:p-9">
       <div className="flex gap-8 border-b border-line pb-4 text-sm font-semibold" role="tablist" aria-label="Account action">
-        <button type="button" role="tab" aria-selected={mode === 'sign-in'} onClick={() => { setMode('sign-in'); setError(''); }} className={mode === 'sign-in' ? 'auth-tab-active' : 'auth-tab'}>Sign in</button>
-        <button type="button" role="tab" aria-selected={mode === 'create-account'} onClick={() => { setMode('create-account'); setError(''); }} className={mode === 'create-account' ? 'auth-tab-active' : 'auth-tab'}>Create account</button>
+        <button type="button" role="tab" aria-selected={mode === 'sign-in'} onClick={() => changeMode('sign-in')} className={mode === 'sign-in' ? 'auth-tab-active' : 'auth-tab'}>Sign in</button>
+        <button type="button" role="tab" aria-selected={mode === 'create-account'} onClick={() => changeMode('create-account')} className={mode === 'create-account' ? 'auth-tab-active' : 'auth-tab'}>Create account</button>
       </div>
       <div className="mt-8 mb-7"><p className="kicker">{mode === 'sign-in' ? 'WELCOME BACK' : 'GET STARTED'}</p>
         <h2 className="studio-heading mt-3">{mode === 'sign-in' ? 'Sign in to Dwelling.' : 'How will you use Dwelling?'}</h2>
@@ -91,7 +98,7 @@ export function AuthPage() {
           <label className="form-label">{accountType === 'agency' ? 'Agency name' : accountType === 'owner' ? 'Your listing business name' : 'Trading / business name'}
             <Input className="mt-2" name="agency_name" required minLength={2} maxLength={160} placeholder="e.g. Riverside Properties"/></label>
           <label className="form-label">Workspace address <span className="text-muted font-normal">(used when signing in)</span>
-            <Input className="mt-2" name="slug" pattern="[a-z0-9][a-z0-9-]{2,49}" required placeholder="riverside-properties"/>
+            <Input className="mt-2" name="slug" required minLength={3} maxLength={50} autoCapitalize="none" spellCheck={false} placeholder="riverside-properties"/>
           </label>
         </>}
         {mode === 'sign-in' && <label className="form-label">Workspace address
@@ -106,7 +113,7 @@ export function AuthPage() {
         <Button type="submit" className="mt-2 w-full" disabled={pending}>{pending ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : 'Create account'} <ArrowRight size={16}/></Button>
       </form>
       <p className="mt-7 text-center text-xs text-muted">{mode === 'create-account' ? 'Your advertisements remain drafts until published.' : 'New to Dwelling?'}
-        {mode === 'sign-in' && <button className="ms-2 font-semibold text-accent hover:underline" type="button" onClick={() => setMode('create-account')}>Create an account</button>}</p>
+        {mode === 'sign-in' && <button className="ms-2 font-semibold text-accent hover:underline" type="button" onClick={() => changeMode('create-account')}>Create an account</button>}</p>
     </section>
   </main>;
 }

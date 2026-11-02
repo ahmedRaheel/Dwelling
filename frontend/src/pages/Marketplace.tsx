@@ -1,14 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Building2, ChevronLeft, ChevronRight, MapPin, Search, SlidersHorizontal, X, BookmarkPlus } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Building2, ChevronLeft, ChevronRight, MapPin, Search, SlidersHorizontal, X, BookmarkPlus } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/client';
 import type { Page, Property, PropertyKind, Purpose } from '@/api/types';
-import { PropertyImage } from '@/components/listings/PropertyImage';
 import { PropertyCard } from '@/components/PropertyCard';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
-import { useLanguage } from '@/context/LanguageContext';
-import { currency, errorMessage } from '@/lib/utils';
+import { errorMessage } from '@/lib/utils';
 
 type Filters = {
   q: string; city: string; society: string; block: string; kind: '' | PropertyKind; purpose: '' | Purpose;
@@ -26,7 +24,6 @@ export function Marketplace() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const agencySlug = searchParams.get('agency');
-  const { language } = useLanguage();
   const [draft, setDraft] = useState<Filters>(defaults);
   const [filters, setFilters] = useState<Filters>(defaults);
   const [page, setPage] = useState(1);
@@ -87,38 +84,16 @@ export function Marketplace() {
     } catch (cause) { setSearchNotice(errorMessage(cause)); }
   }
 
-  const lead = results?.items.find(item => item.photos.length > 0) ?? results?.items[0];
   const professional = user?.role === 'owner' || user?.role === 'broker' || user?.role === 'admin';
   const activeFilters = Object.entries(filters).filter(([key, value]) => key !== 'sort' && Boolean(value)).length;
 
   return <main>
-    <section className="hero-section">
-      <div className="page-shell grid gap-12 pb-12 pt-14 lg:grid-cols-[1.06fr_.94fr] lg:items-center lg:gap-14 lg:pb-18 lg:pt-18">
-        <div className="max-w-2xl">
-          <p className="kicker mb-7 flex items-center gap-3"><span className="inline-block h-px w-7 bg-accent"/>PROPERTY DISCOVERY, CONSIDERED</p>
-          <h1 className="hero-title">A place to <em>belong.</em><br/>A space to <em>grow.</em></h1>
-          <p className="mt-7 max-w-[480px] text-base leading-8 text-[#646b60]">{language === 'ur' ? 'گھر، اپارٹمنٹ، پورشن، پلاٹ اور کاروباری جگہیں — ایک بہتر انتخاب کے لیے واضح معلومات اور حقیقی تصاویر۔' : 'Homes, apartments, portions and commercial spaces. Thoughtfully presented, clearly priced, and easier to compare.'}</p>
-          <div className="mt-9 flex flex-wrap items-center gap-5">
-            <a href="#property-results" className="inline-flex items-center gap-2 border-b border-ink pb-2 text-sm font-semibold text-ink">Explore current listings <ArrowDown size={16}/></a>
-            {professional && <Link to="/broker/listings/new" className="inline-flex items-center gap-1 text-sm font-semibold text-accent">Advertise your property <ArrowUpRight size={16}/></Link>}
-          </div>
-          <div className="mt-14 hidden gap-10 border-t border-line pt-7 sm:flex"><div><strong className="block text-xl font-semibold">6</strong><span className="text-xs text-muted">Property categories</span></div><div><strong className="block text-xl font-semibold">EN / اردو</strong><span className="text-xs text-muted">Language choice</span></div><div><strong className="block text-xl font-semibold">AI</strong><span className="text-xs text-muted">Evidence-led insights</span></div></div>
-        </div>
-        <div className="hero-visual relative">
-          <div className="hero-image h-[380px] overflow-hidden rounded-[3px] sm:h-[500px]">
-            {lead ? <Link to={`/property/${lead.id}`} className="block h-full w-full"><PropertyImage property={lead} thumbnail={false} className="h-full w-full object-cover"/></Link> :
-              <div className="hero-empty flex h-full flex-col justify-between p-8"><div className="flex justify-between text-xs tracking-[.22em]"><span>DWELLING / EST. 2026</span><span>01—06</span></div>
-                <div className="hero-architecture" aria-hidden="true"><div className="building-one"/><div className="building-two"/><div className="building-three"/></div>
-                <div><span className="text-xs tracking-[.18em]">AN OPEN DOOR</span><h2 className="mt-2 font-editorial text-4xl italic leading-none">A new perspective<br/>on property.</h2></div>
-              </div>}
-          </div>
-          <div className="hero-figcaption mt-3 flex justify-between gap-2 text-[11px] tracking-[.08em] text-muted"><span>{lead ? `${lead.area_name || lead.city}, ${lead.city}` : 'Designed for every next chapter'}</span><span>THE PROPERTY EDIT</span></div>
-          {lead && <Link to={`/property/${lead.id}`} className="feature-slip absolute -bottom-6 -start-5 hidden max-w-64 border border-line bg-white p-5 shadow-xl shadow-[#2a342515] sm:block"><p className="kicker">A CLOSER LOOK</p><p className="mt-2 line-clamp-2 font-medium">{lead.title}</p><p className="mt-2 text-lg font-semibold tabular-nums">{currency(lead.price, lead.currency, language)}</p><span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-accent">View details <ArrowRight size={14}/></span></Link>}
-        </div>
-      </div>
-    </section>
+    <div className="page-shell flex flex-wrap items-center justify-between gap-3 border-b border-line py-5">
+      <div><p className="kicker">OPEN MARKETPLACE</p><p className="mt-1 text-sm text-muted">Browse published properties without creating an account.</p></div>
+      {!user && <div className="flex items-center gap-4 text-sm"><Link to="/auth" className="font-semibold text-ink hover:text-accent">Sign in</Link><Link to="/auth?mode=register" className="inline-flex items-center gap-2 rounded-sm bg-ink px-4 py-2.5 font-semibold text-white hover:bg-accent">Post your property <ArrowUpRight size={15}/></Link></div>}
+    </div>
 
-    <section className="page-shell relative z-10 -mt-3 lg:-mt-4" aria-label="Property search">
+    <section className="page-shell relative z-10 pt-8" aria-label="Property search">
       <form onSubmit={search} className="search-console studio-panel p-4 sm:p-6">
         <div className="grid gap-4 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-end">
           <label className="form-label">City<div className="relative mt-2"><MapPin size={17} className="pointer-events-none absolute start-3 top-3.5 text-muted"/><input className="field ps-10" value={draft.city} onChange={event => setDraft(previous => ({ ...previous, city: event.target.value }))} placeholder="Karachi, Lahore, Islamabad…" /></div></label>
@@ -151,8 +126,8 @@ export function Marketplace() {
       </div>}
     </section>
 
-    <section id="property-results" className="page-shell scroll-mt-28 pb-20 pt-18 sm:pt-24">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="kicker">THE PROPERTY COLLECTION / {new Date().getFullYear()}</p><h2 className="editorial-title mt-3 text-[clamp(2.2rem,4.6vw,3.8rem)]">{agencySlug ? 'An agency’s current collection.' : 'Spaces worth exploring.'}</h2>
+    <section id="property-results" className="page-shell scroll-mt-28 pb-20 pt-10 sm:pt-14">
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="kicker">THE PROPERTY COLLECTION / {new Date().getFullYear()}</p><h2 className="editorial-title mt-3 text-[clamp(2.2rem,4.6vw,3.8rem)]">{agencySlug ? 'An agency’s current collection.' : 'Published properties, ready to explore.'}</h2>
         <p className="mt-3 text-sm text-muted">Find a good fit, without the guesswork.</p></div>
         <p className="text-sm tabular-nums text-muted">{loading ? 'Searching…' : `${results?.total ?? 0} listings available`}</p>
       </div>
@@ -168,6 +143,6 @@ export function Marketplace() {
         <Button variant="outline" disabled={page >= Math.ceil(results.total / results.size)} onClick={() => setPage(value => value + 1)}>Next <ChevronRight size={16}/></Button></nav>}
     </section>
     <section className="bg-ink py-14 text-white"><div className="page-shell flex flex-wrap items-center justify-between gap-6"><div><p className="kicker !text-[#d6b9a7]">SELLING OR LETTING?</p><h2 className="mt-3 font-editorial text-3xl sm:text-4xl">Your property has a story. Tell it well.</h2></div>
-      <Link to={professional ? '/broker/listings/new' : '/auth'} className="inline-flex items-center gap-2 border border-white/50 px-6 py-3 text-sm font-semibold transition-colors hover:bg-white hover:text-ink">Create a property ad <ArrowRight size={17}/></Link></div></section>
+      <Link to={professional ? '/broker/listings/new' : '/auth?mode=register'} className="inline-flex items-center gap-2 border border-white/50 px-6 py-3 text-sm font-semibold transition-colors hover:bg-white hover:text-ink">Create a property ad <ArrowRight size={17}/></Link></div></section>
   </main>;
 }
