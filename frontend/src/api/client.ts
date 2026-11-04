@@ -45,9 +45,18 @@ async function request<T>(path: string, options: RequestInit = {}, retry = true,
     catch { setTokens(null); window.dispatchEvent(new Event('proptech-session-expired')); }
   }
   if (!response.ok) {
-    const problem: { detail?: unknown } = await response.json().catch(() => ({}));
-    const message = typeof problem.detail === 'string' ? problem.detail : JSON.stringify(problem.detail ?? `HTTP ${response.status}`);
-    throw new Error(message);
+    const problem: { detail?: unknown; error?: { code?: string; message?: string; request_id?: string; details?: unknown } } =
+      await response.json().catch(() => ({}));
+    const detail = problem.error?.details ?? problem.detail;
+    const validation = Array.isArray(detail)
+      ? detail.map((item: { field?: string; loc?: string[]; message?: string; msg?: string }) =>
+          `${item.field ?? item.loc?.slice(1).join('.') ?? 'Field'}: ${item.message ?? item.msg ?? 'Invalid value'}`
+        ).join('; ')
+      : '';
+    const message = validation || problem.error?.message ||
+      (typeof detail === 'string' ? detail : `Unable to complete request (HTTP ${response.status})`);
+    const supportRef = problem.error?.request_id ?? response.headers.get('X-Request-ID');
+    throw new Error(`${message}${response.status >= 500 && supportRef ? ` (Reference: ${supportRef})` : ''}`);
   }
   if (response.status === 204) return undefined as T;
   return responseType === 'blob' ? await response.blob() as T : await response.json() as T;

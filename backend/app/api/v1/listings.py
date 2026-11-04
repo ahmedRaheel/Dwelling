@@ -225,6 +225,9 @@ async def create_property(payload: PropertyCreate, db: DB,
     await db.flush()
     await assign_details(db, item, payload)
     await db.flush()
+    # Newly inserted async ORM objects do not have selectin relationships loaded.
+    # Pydantic must never initiate implicit IO (MissingGreenlet -> HTTP 500).
+    await db.refresh(item, attribute_names=['photos', 'pg', 'portion'])
     return PropertyResponse.model_validate(item)
 
 
@@ -258,6 +261,7 @@ async def update_property(property_id: UUID, payload: PropertyUpdate, db: DB,
         if not readiness['ready']:
             raise HTTPException(422, {'message': 'A published listing must remain complete', **readiness})
     await db.flush()
+    await db.refresh(item, attribute_names=['photos', 'pg', 'portion'])
     return PropertyResponse.model_validate(item)
 
 
