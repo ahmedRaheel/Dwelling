@@ -41,6 +41,34 @@ async def test_draft_create_all_kinds_and_form_validation():
             assert (item['pg'] is not None) == (case['kind'] == 'pg')
             assert (item['portion'] is not None) == (case['kind'] == 'portion')
 
+        # Regression: actual Karachi rental-apartment payload that previously
+        # raised MissingGreenlet inside assign_details at `if item.pg`.
+        apartment = {
+            'title': 'Two bed DD apartment',
+            'description': 'A westopen , corner appartment',
+            'kind': 'apartment', 'purpose': 'rent', 'status': 'draft',
+            'city': 'Karachi', 'area_name': 'DHA phase 1',
+            'address': 'Phase 1 Dha  Karachi', 'society': 'DHA',
+            'block': 'phase 1', 'price_negotiable': True,
+            'ready_to_move': False, 'video_url': None,
+            'price': '50000', 'currency': 'PKR', 'area_sqft': '1400',
+            'bedrooms': 2, 'bathrooms': 2, 'furnished': False,
+            'photo_url': None,
+            'amenities': ['Generator', 'Parking', 'Elevator', 'Security',
+                          'Balcony', 'Terrace', 'Gas connection', 'Water supply',
+                          'Corner property', 'Near transport', 'Near school'],
+            'highlights': ['Cover Car Parking, Generator'],
+            'contact_phone': '03128699111', 'latitude': None, 'longitude': None,
+            'pg': None, 'portion': None,
+        }
+        apartment_response = await client.post('/api/v1/listings', headers=headers, json=apartment)
+        assert apartment_response.status_code == 201, apartment_response.text
+        created = apartment_response.json()
+        assert created['kind'] == 'apartment'
+        assert created['pg'] is None
+        assert created['portion'] is None
+        assert created['price'] is not None
+
         bad = await client.post('/api/v1/listings', headers=headers, json={**common, 'kind': 'house', 'price': '-100'})
         assert bad.status_code == 422, bad.text
         assert bad.json()['error']['code'] == 'VALIDATION_ERROR'
@@ -55,3 +83,10 @@ async def test_draft_create_all_kinds_and_form_validation():
         unauthenticated = await client.post('/api/v1/listings', json={**common, 'kind': 'house'})
         assert unauthenticated.status_code == 401
         assert unauthenticated.json()['error']['code'] == 'HTTP_401'
+
+@pytest.mark.asyncio
+async def test_insights_requires_authentication():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.get(f'/api/v1/listings/{uuid4()}/insights')
+        assert response.status_code == 401
+        assert response.json()['error']['code'] == 'HTTP_401'

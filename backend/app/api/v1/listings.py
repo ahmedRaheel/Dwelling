@@ -1,4 +1,5 @@
 from typing import Annotated, Literal
+from decimal import Decimal
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, or_, select
@@ -8,6 +9,7 @@ from app.models.entities import (Interaction, InteractionKind, ListingStatus, PG
                                  Role, User, Tenant)
 from app.schemas.domain import PropertyCreate, PropertyPage, PropertyResponse, PropertyUpdate
 from app.services.embeddings import encode, property_text
+from app.services.listing_insights import calculate_market_insights
 
 router = APIRouter(prefix='/listings', tags=['Listings'])
 
@@ -46,6 +48,11 @@ async def validate_parent(db: AsyncSession, tenant_id: UUID, kind: PropertyKind,
 
 
 async def assign_details(db: AsyncSession, item: Property, payload: PropertyCreate):
+    # An async SQLAlchemy relationship must never be read while unloaded:
+    # `if item.pg` and `if item.portion` otherwise invoke synchronous lazy IO,
+    # raising MissingGreenlet on freshly flushed Property instances.
+    # Explicitly load both relationships *before* testing or modifying them.
+    await db.refresh(item, attribute_names=['pg', 'portion'])
     if payload.kind == PropertyKind.pg and payload.pg:
         details = payload.pg.model_dump()
         if item.pg is None:
@@ -305,6 +312,39 @@ async def check_readiness(property_id: UUID, db: DB,
     return listing_readiness(item)
 
 
+@router.get('/{property_id}/insights')
+async def property_insights(property_id: UUID, db: DB,
+                            user: Annotated[User, Depends(require_roles(Role.owner, Role.admin, Role.broker))]):
+    """Private listing studio insight. Only public comparable ads enter the pricing sample."""
+    item = await get_property(db, property_id)
+    enforce_editor(user, item)
+    conditions = (
+        Property.status == ListingStatus.published,
+        Property.id != item.id,
+        Property.city.ilike(item.city.strip()),
+        Property.area_name.ilike(item.area_name.strip()),
+        Property.kind == item.kind,
+        Property.purpose == item.purpose,
+        Property.currency == item.currency,
+        Property.area_sqft.between(item.area_sqft * Decimal('0.7'), item.area_sqft * Decimal('1.3')),
+    )
+    comparable_prices = (await db.scalars(
+        select(Property.price).where(*conditions)
+        .order_by(Property.created_at.desc(), Property.id.desc()).limit(100)
+    )).all()
+    duplicate_count = await db.scalar(
+        select(func.count(Property.id)).where(
+            Property.id != item.id, Property.tenant_id == item.tenant_id,
+            Property.title.ilike(item.title.strip()),
+            Property.status != ListingStatus.archived,
+        )
+    ) or 0
+    return calculate_market_insights(
+        asking_price=item.price, area_sqft=item.area_sqft,
+        comparable_prices=list(comparable_prices), duplicate_count=duplicate_count,
+    )
+
+
 @router.post('/{property_id}/publish', response_model=PropertyResponse)
 async def publish_property(property_id: UUID, db: DB,
                            user: Annotated[User, Depends(require_roles(Role.owner, Role.admin, Role.broker))]):
@@ -316,6 +356,7 @@ async def publish_property(property_id: UUID, db: DB,
     item.status = ListingStatus.published
     item.version += 1
     await db.flush()
+    await db.refresh(item, attribute_names=['photos', 'pg', 'portion'])
     return PropertyResponse.model_validate(item)
 
 
@@ -327,4 +368,5 @@ async def unpublish_property(property_id: UUID, db: DB,
     item.status = ListingStatus.draft
     item.version += 1
     await db.flush()
+    await db.refresh(item, attribute_names=['photos', 'pg', 'portion'])
     return PropertyResponse.model_validate(item)
