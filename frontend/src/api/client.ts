@@ -34,11 +34,13 @@ async function renew() {
 
 async function request<T>(path: string, options: RequestInit = {}, retry = true, responseType: 'json' | 'blob' = 'json'): Promise<T> {
   const token = sessionStorage.getItem(ACCESS_KEY);
+  const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const response = await fetch(`${BASE}${path}`, {
     ...options,
     headers: { Accept: responseType === 'blob' ? 'image/webp' : 'application/json', 'Accept-Language': document.documentElement.lang,
       ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), 'X-Request-ID': requestId, ...options.headers },
   });
   if (response.status === 401 && retry && token && !['/auth/login', '/auth/register', '/auth/tenant/register', '/auth/refresh', '/auth/logout'].includes(path)) {
     try { await renew(); return request<T>(path, options, false, responseType); }
@@ -55,7 +57,8 @@ async function request<T>(path: string, options: RequestInit = {}, retry = true,
       : '';
     const message = validation || problem.error?.message ||
       (typeof detail === 'string' ? detail : `Unable to complete request (HTTP ${response.status})`);
-    const supportRef = problem.error?.request_id ?? response.headers.get('X-Request-ID');
+    const supportRef = [problem.error?.request_id, response.headers.get('X-Request-ID'), requestId]
+      .find(value => value && value !== 'unknown');
     throw new Error(`${message}${response.status >= 500 && supportRef ? ` (Reference: ${supportRef})` : ''}`);
   }
   if (response.status === 204) return undefined as T;

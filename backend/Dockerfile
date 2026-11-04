@@ -8,6 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY schema_check.py ./schema_check.py
+# Fail the image build if a service or router is missing or cannot import.
+RUN JWT_SECRET=release-build-validation-only-0123456789 python -m app.release_check
 RUN useradd --uid 10001 --create-home appuser && mkdir -p /srv/media && chown appuser:appuser /srv/media
 USER appuser
 EXPOSE 8000

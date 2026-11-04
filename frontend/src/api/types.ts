@@ -20,6 +20,16 @@ export interface PropertyPhoto {
   width: number; height: number; byte_size: number;
   position: number; is_cover: boolean; url: string; thumbnail_url: string;
 }
+export interface ListingInsights {
+  asking_price_per_sqft: number | null;
+  local_median_asking_price: number | null;
+  local_sample_size: number;
+  difference_from_local_median_pct: number | null;
+  positioning: 'insufficient_data' | 'above_local_asking_median' | 'below_local_asking_median' | 'near_local_asking_median';
+  similar_portfolio_ad_count: number;
+  warnings: string[];
+  disclaimer: string;
+}
 export interface ListingReadiness {
   ready: boolean; blockers: string[]; suggestions: string[]; score: number;
 }

@@ -6,7 +6,7 @@ import {
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '@/api/client';
 import type {
-  ListingReadiness, PortionKind, Property, PropertyInput, PropertyKind,
+  ListingInsights, ListingReadiness, PortionKind, Property, PropertyInput, PropertyKind,
   Purpose, RoomType,
 } from '@/api/types';
 import { PropertyImage } from '@/components/listings/PropertyImage';
@@ -84,6 +84,8 @@ export function ListingComposer() {
   const initialStage = new URLSearchParams(location.search).get('step');
   const [stage, setStage] = useState<Stage>(initialStage === 'photos' ? 'photos' : initialStage === 'publish' ? 'publish' : 'details');
   const [readiness, setReadiness] = useState<ListingReadiness | null>(null);
+  const [insights, setInsights] = useState<ListingInsights | null>(null);
+  const [insightsError, setInsightsError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
@@ -103,6 +105,8 @@ export function ListingComposer() {
   useEffect(() => {
     if (!property || stage !== 'publish') return;
     void api<ListingReadiness>(`/listings/${property.id}/readiness`).then(setReadiness).catch(cause => setError(errorMessage(cause)));
+    setInsights(null); setInsightsError('');
+    void api<ListingInsights>(`/listings/${property.id}/insights`).then(setInsights).catch(cause => setInsightsError(errorMessage(cause))); 
   }, [stage, property]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -241,6 +245,22 @@ export function ListingComposer() {
               <p className="mt-4 text-2xl font-semibold tabular-nums">{currency(property.price, property.currency, language)}{property.purpose === 'rent' && <span className="ms-2 text-xs font-normal text-muted">per month</span>}</p>
               <Link to={`/property/${property.id}`} className="link-text mt-4 inline-flex items-center gap-1 text-sm">Open full preview <ArrowRight size={15}/></Link>
             </div></div></section>
+          <section className="studio-panel space-y-4 p-6 sm:p-9" aria-label="Smart listing insights">
+            <p className="kicker">SMART LISTING INSIGHTS</p>
+            <h2 className="studio-heading">Know your local asking-price position</h2>
+            {insightsError && <p role="status" className="text-sm text-muted">Pricing context unavailable: {insightsError}</p>}
+            {!insights && !insightsError && <p className="text-sm text-muted">Reviewing comparable published ads…</p>}
+            {insights && <>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-md border border-line p-4"><p className="text-xs text-muted">Your asking price / sq ft</p><p className="mt-2 text-xl font-semibold">{insights.asking_price_per_sqft === null ? 'N/A' : currency(insights.asking_price_per_sqft, property.currency, language)}</p></div>
+                <div className="rounded-md border border-line p-4"><p className="text-xs text-muted">Local median asking price</p><p className="mt-2 text-xl font-semibold">{insights.local_median_asking_price === null ? 'Not enough data' : currency(insights.local_median_asking_price, property.currency, language)}</p></div>
+                <div className="rounded-md border border-line p-4"><p className="text-xs text-muted">Comparable listings</p><p className="mt-2 text-xl font-semibold">{insights.local_sample_size}</p></div>
+              </div>
+              {insights.difference_from_local_median_pct !== null && <p className="text-sm font-medium">Your advertised price is {Math.abs(insights.difference_from_local_median_pct)}% {insights.difference_from_local_median_pct > 0 ? 'above' : insights.difference_from_local_median_pct < 0 ? 'below' : 'equal to'} the local asking-price median.</p>}
+              {insights.warnings.map(warning => <p key={warning} className="flex gap-2 text-sm text-muted"><CircleAlert size={16} className="mt-0.5 shrink-0"/>{warning}</p>)}
+              <p className="text-xs leading-5 text-muted">{insights.disclaimer}</p>
+            </>}
+          </section>
           <section className="studio-panel space-y-5 p-6 sm:p-9">
             <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="kicker">QUALITY CHECK</p><h2 className="studio-heading mt-2">Ready for the marketplace?</h2></div>
               {readiness && <div className="quality-score"><strong>{readiness.score}</strong><span>/ 100</span></div>}</div>
